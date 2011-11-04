@@ -40,3 +40,6 @@ If your OpenSim regions are using ports 9000-9050 range then change the UDP port
 * "llmessage.lua" -- contains the message_template.msg file parser the decodes the tokens from the lexer into an tree of tables containing all details about each message/block/variable from the template file.  This file only has pure lua code.
 * "lexer.lua" -- contains the template file lexer.  This lexer knows how to tokenize the template file into the follow tokens: IDENTIFIER, NUMBER, COMMENT, EOL.  The stream of tokens produced by this lexer is parsed by the "llmessage.lua" file.  This file only has pure lua code.
 
+== License ==
+This code is released under both the "Simplified BSD License" and the GPL.  The user may decide which license they want to use the code under.  If you use this code with Wireshark you maybe required to use it under the terms of the GPL.  If you want to use parts or all of the code separate from Wireshark you may use it under the terms of the "Simplified BSD License".
+
