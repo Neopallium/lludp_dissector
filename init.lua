@@ -9,5 +9,5 @@ do
 end
  
 -- Load lludp protocol dissector.
-dofile("lludp.lua")
+require("lludp.dissector")
 

@@ -1,7 +1,14 @@
--- Copyright (c)2011, Robert G. Jakabosky <bobby@sharedrealm.com>. All rights reserved.
+-- Copyright (c) 2010, Robert G. Jakabosky <bobby@sharedrealm.com> All rights reserved.
+
+local io_lines = io.lines
+local io_write = io.write
+local pairs = pairs
+local tonumber = tonumber
+local tinsert = table.insert
+local format = string.format
 
 -- Token types.
-Token = {
+local Token = {
 NONE         = -1,
 IDENTIFIER   = -2,
 NUMBER       = -3,
@@ -10,15 +17,10 @@ EOL          = -7,
 ["{"] = "{",
 ["}"] = "}",
 }
-TokenNames = {
-[-1] = "NONE",
-[-2] = "IDENTIFIER",
-[-3] = "NUMBER",
-[-6] = "COMMENT",
-[-7] = "EOL",
-["{"] = "{",
-["}"] = "}",
-}
+local TokenNames = {}
+for name,val in pairs(Token) do
+	TokenNames[val] = name
+end
 
 -- parse line into array of tokens.
 local function default_parse_tokens(line)
@@ -27,7 +29,12 @@ local function default_parse_tokens(line)
 	-- check for a comment on this line.
 	local idx = line:find("//")
 	if idx ~= nil then
-		comment = {Token.COMMENT, line:sub(idx)}
+		local text = line:sub(idx + 2)
+		-- remove space from start of comment.
+		while text:sub(1,1) == ' ' do
+			text = text:sub(2)
+		end
+		comment = {Token.COMMENT, text}
 		-- remove comment from line
 		line = line:sub(1,idx - 1)
 	end
@@ -45,63 +52,60 @@ local function default_parse_tokens(line)
 			-- token is an identifier
 			tok_type = Token.IDENTIFIER
 		end
-		table.insert(tokens,{tok_type,tok})
+		tinsert(tokens,{tok_type,tok})
 	end
 	-- insert comment token.
 	if comment ~= nil then
-		table.insert(tokens,comment)
+		tinsert(tokens,comment)
 	end
 	-- add token to mark the end of this line
-	table.insert(tokens,{Token.EOL, ""})
+	tinsert(tokens,{Token.EOL, ""})
 	return tokens
 end
 
-function get_lexer(file, parse_tokens)
+module(...)
+
+-- export Token & TokenNames tables
+_M.Token = Token
+_M.TokenNames = TokenNames
+
+function new(file, parse_tokens)
 	-- use the default line tokenizer if one is not provided
-	if parse_tokens == nil then parse_tokens = default_parse_tokens end
+	parse_tokens = parse_tokens or default_parse_tokens
 	-- next/current line code
 	local line_num = 0
 	local line = nil
-	local next_line = io.lines(file)
+	local next_line,next_state = io_lines(file)
 	-- parse line tokens code
-	local get_next_token = nil
 	local next_tokens = function ()
-		local f, tokens, idx
+		local tokens
 		repeat
 			line_num = line_num + 1
-			line = next_line()
+			line = next_line(next_state)
 			if line == nil then return nil end
+			-- parse tokens on this line
 			tokens = parse_tokens(line)
 		until tokens ~= nil
-		-- create get_next_toekn function from table iterator
-		f, tokens, idx = ipairs(tokens)
-		get_next_token = function()
-			idx, token = f(tokens, idx)
-			return token
-		end
 		return tokens
 	end
+	local tokens = nil
+	local idx = 0
 
-	-- get first group of tokens
-	if next_tokens() == nil then
-		-- error reading file or empty file
-		return nil
-	end
 	-- build lexer table.
 	local lexer = {
 	get_token = function ()
-		local token
-		repeat
-			token = get_next_token()
-			if token == nil then
-				-- get next group of tokens
-				if next_tokens() == nil then
-					-- end of file.
-					return nil
-				end
-			end
-		until token ~= nil
-		return token
+		-- return next token
+		idx = idx + 1
+		if tokens and tokens[idx] then
+			return tokens[idx]
+		end
+		-- we need more tokens
+		tokens = next_tokens()
+		-- where there anymore tokens?
+		if not tokens then return nil end
+		-- return first token
+		idx = 1
+		return tokens[1]
 	end,
 	get_line_number = function() return line_num end,
 	get_line = function() return line end
@@ -109,8 +113,8 @@ function get_lexer(file, parse_tokens)
 	return lexer
 end
 
-function print_tokens(file)
-	local lexer = get_lexer(file)
+function dump(file)
+	local lexer = new(file)
 	local num = -1
 	while true do
 		local tok = lexer.get_token()
@@ -119,11 +123,11 @@ function print_tokens(file)
 		end
 		if num ~= lexer.get_line_number() then
 			num = lexer.get_line_number()
-			io.write("\n")
-			io.write(string.format("%d: ",num))
+			io_write("\n")
+			io_write(format("%d: ",num))
 		end
-		io.write(string.format("%s ",tok[2]))
+		io_write(format("%s ",tok[2]))
 	end
-	io.write("\n")
+	io_write("\n")
 end
 

@@ -1,40 +1,48 @@
 -- Copyright (c)2011, Robert G. Jakabosky <bobby@sharedrealm.com>. All rights reserved.
 
-dofile("lexer.lua")
+local lexer = require("lludp.lexer")
+local Token = lexer.Token
+local TokenNames = lexer.TokenNames
 
-local lexer
+local io_write = io.write
+local format = string.format
+local tinsert = table.insert
+local pcall = pcall
+local error = error
+local tonumber = tonumber
+
+local lex
 local cur_token = nil
 local cur_token_str = nil
 
 local function get_token(skip_tokens)
-	repeat
-	token = lexer.get_token()
+	local token = lex.get_token()
 	if token ~= nil then
 		cur_token = token[1]
 		cur_token_str = token[2]
 	end
-	until token == nil or not skip_tokens[cur_token]
 	return token
 end
 
 local function run_parser(parser)
 	local state = parser.init()
-	if parser.skip_tokens == nil then parser.skip_tokens = {} end
-	while get_token(parser.skip_tokens) do
+	local skip_tokens = parser.skip_tokens
+	if skip_tokens == nil then skip_tokens = {} end
+	while get_token() do
 		-- check what the parser is expecting next.
-		if state.expect then
+		if state.expect and not skip_tokens[cur_token] then
 			-- check expected type
 			if state.expect ~= cur_token then
-				error(string.format("state.expected token '%s' instead of '%s'",
+				error(format("state.expected token '%s' instead of '%s'",
 					TokenNames[state.expect], TokenNames[cur_token]))
 			end
 			-- reset expect field
 			state.expect = nil
 		end
-		if state.expect_str then
+		if state.expect_str and not skip_tokens[cur_token] then
 			-- check expected string
 			if state.expect_str ~= cur_token_str then
-				error(string.format("state.expected token '%s' instead of '%s'",
+				error(format("state.expected token '%s' instead of '%s'",
 					state.expect_str, cur_token_str))
 			end
 			-- reset expect_str field
@@ -49,7 +57,7 @@ local function run_parser(parser)
 				return ret
 			end
 		elseif parser.unhandled_error then
-			error(string.format("unhandled token '%s' when paring '%s'\n", cur_token_str, parser.name))
+			error(format("unhandled token '%s' when paring '%s'\n", cur_token_str, parser.name))
 		end
 	end
 	return parser.eof(state)
@@ -58,7 +66,7 @@ end
 -- Known variable types and there fixed length.
 --   length == -1, requires a number after the type that is the length of count field
 --   length == -2, requires a number after the type that is the fixed variable length.
-VariableTypes = {
+local VariableTypes = {
 Null = 0,
 Fixed = -2,
 Variable = -1,
@@ -117,7 +125,7 @@ end,
 			state.required = state.required - 1
 		end
 	else
-		error(string.format("unhandled variable identifier: %s\n",cur_token_str))
+		error(format("unhandled variable identifier: %s\n",cur_token_str))
 	end
 	return nil
 end,
@@ -134,7 +142,7 @@ end,
 		end
 		state.required = state.required - 1
 	else
-		error(string.format("unhandled variable number: %s\n",cur_token_str))
+		error(format("unhandled variable number: %s\n",cur_token_str))
 	end
 	return nil
 end,
@@ -179,8 +187,26 @@ init = function()
 		fixed_length = true,
 		expect = Token.IDENTIFIER,
 		expect_field = "name",
-		required = 2
+		required = 2,
+		comments = {},
 	}
+end,
+[Token.EOL] = function(state)
+	if #state.comments > 0 and state.last_variable ~= nil then
+		-- add pre-comments to last parsed variable.
+		state.last_variable.comments = state.comments
+		state.comments = {}
+	end
+	state.last_variable = nil
+end,
+[Token.COMMENT] = function(state)
+	-- eol comment.
+	if state.last_variable then
+		state.last_variable.eol_comment = cur_token_str
+	else
+		state.comments[#state.comments + 1] = cur_token_str
+	end
+	return nil
 end,
 [Token.IDENTIFIER] 	= function(state)
 	if state.expect_field == "name" then
@@ -205,7 +231,7 @@ end,
 			state.required = state.required - 1
 		end
 	else
-		error(string.format("unhandled block identifier: %s\n",cur_token_str))
+		error(format("unhandled block identifier: %s\n",cur_token_str))
 	end
 	return nil
 end,
@@ -214,13 +240,14 @@ end,
 		state.count = tonumber(cur_token_str)
 		state.required = state.required - 1
 	else
-		error(string.format("unhandled block number: %s\n",cur_token_str))
+		error(format("unhandled block number: %s\n",cur_token_str))
 	end
 	return nil
 end,
 ["{"]		= function(state)
 	local variable = run_parser(variable_parser)
-	table.insert(state,variable)
+	state.last_variable = variable
+	tinsert(state,variable)
 	-- add length of fixed length variables to minimal length of block.
 	if variable.has_count then
 		state.min_length = state.min_length + variable.count_length
@@ -259,8 +286,11 @@ init = function()
 		expect_field = "name",
 		fixed_length = true,
 		min_length = 0,
-		required = 5
+		required = 5,
 	}
+end,
+[Token.COMMENT] = function(state)
+	return nil
 end,
 [Token.IDENTIFIER] 	= function(state)
 	if state.expect_field == "name" then
@@ -281,7 +311,7 @@ end,
 		state.compression = cur_token_str
 		state.required = state.required - 1
 	else
-		error(string.format("unhandled message identifier: %s\n",cur_token_str))
+		error(format("unhandled message identifier: %s\n",cur_token_str))
 	end
 	return nil
 end,
@@ -298,10 +328,10 @@ end,
 			state.id = state.number
 			state.id_length = 1
 		elseif freq == "Medium" then
-			state.id = tonumber("0xFF" .. string.format("%02X", state.number))
+			state.id = tonumber("0xFF" .. format("%02X", state.number))
 			state.id_length = 2
 		elseif freq == "Low" then
-			state.id = tonumber("0xFFFF" .. string.format("%04X", state.number))
+			state.id = tonumber("0xFFFF" .. format("%04X", state.number))
 			state.id_length = 4
 		else
 			-- Fixed is already correct.
@@ -309,13 +339,13 @@ end,
 			state.id_length = 4
 		end
 	else
-		error(string.format("unhandled message number: %s\n",cur_token_str))
+		error(format("unhandled message number: %s\n",cur_token_str))
 	end
 	return nil
 end,
 ["{"]		= function(state)
 	local block = run_parser(block_parser)
-	table.insert(state,block)
+	tinsert(state,block)
 	-- add min length of block to minimal length of message
 	local min_length = block.min_length
 	if block.has_count then
@@ -356,8 +386,14 @@ init = function()
 	return {
 		version = 0,
 		msg_count = 0,
-		msgs = {}
+		msgs = {},
+		msgs_file_order = {},
+		comments = {},
 	}
+end,
+[Token.COMMENT] = function(state)
+	state.comments[#state.comments + 1] = cur_token_str
+	return nil
 end,
 [Token.IDENTIFIER] 	= function(state)
 	-- handle version
@@ -365,7 +401,7 @@ end,
 		state.expect = Token.NUMBER
 		state.last_ident = cur_token_str
 	else
-		error(string.format("unknown template identifier: %s\n",cur_token_str))
+		error(format("unknown template identifier: %s\n",cur_token_str))
 	end
 	return nil
 end,
@@ -379,45 +415,49 @@ end,
 			error("invalid verion: " .. state.version)
 		end
 	else
-		error(string.format("unhandled template number: %s\n",cur_token_str))
+		error(format("unhandled template number: %s\n",cur_token_str))
 	end
 	return nil
 end,
 ["{"]		= function(state)
 	local message = run_parser(message_parser)
+	message.comments = state.comments
+	state.comments = {}
 	state.msg_count = state.msg_count + 1
 	state.msgs[message.id] = message
+	state.msgs_file_order[#state.msgs_file_order + 1] = message
 end,
 ["}"]		= function(state)
-	error(string.format("unhandled '%s' token",cur_token_str))
+	error(format("unhandled '%s' token",cur_token_str))
 end,
 eof = function(state)
 	return state
 end,
 }
 
-function parse_template(file)
+module('lludp.message_template')
+
+function parse(file, quiet)
 	-- create lexer
-	local status, ret = pcall(get_lexer,file)
+	local status, ret = pcall(lexer.new,file)
 	if not status then
-		ret = string.format("LLUDP: Failed parse file into tokens: %s\n%s\n", file, ret)
+		ret = format("LLUDP: Failed parse file into tokens: %s\n%s\n", file, ret)
 		error(ret, 0)
 		return nil
 	end
-	lexer = ret
+	lex = ret
 	-- parse template file
 	local status, ret = pcall(run_parser,template_parser)
 	if not status then
-		ret = string.format("LLUDP: Failed parsing on line %s:%d: '%s'\n%s\n",
+		ret = format("LLUDP: Failed parsing on line %s:%d: '%s'\n%s\n",
 			file, lexer.get_line_number(), lexer.get_line(), ret)
 		error(ret, 0)
 		return nil
 	end
-	io.write("finished parsing: " .. file .. "\n")
+	if not quiet then
+		io_write("finished parsing: " .. file .. "\n")
+	end
 	-- return list of messages parsed from file.
 	return ret
 end
-
---parse_template("message_template.msg")
---print_tokens("message_template.msg")
 
