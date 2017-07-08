@@ -63,11 +63,7 @@ local function default_parse_tokens(line)
 	return tokens
 end
 
-module(...)
-
--- export Token & TokenNames tables
-_M.Token = Token
-_M.TokenNames = TokenNames
+-- Public API --
 
 function new(file, parse_tokens)
 	-- use the default line tokenizer if one is not provided
@@ -131,3 +127,9 @@ function dump(file)
 	io_write("\n")
 end
 
+return {
+    Token = Token,
+    TokenNames = TokenNames,
+    new = new,
+    dump = dump,
+}
