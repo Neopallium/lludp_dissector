@@ -685,4 +685,4 @@ end
 register_udp_port_range(9000,9003)
 -- reg. ports 12000-12050
 register_udp_port_range(12030,12040)
-register_udp_port_range(13000,13050)
+-- register_udp_port_range(13000,13050)
