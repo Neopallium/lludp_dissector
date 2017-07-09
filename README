@@ -3,41 +3,27 @@ This is a Wireshark protocol dissector written in Lua for the Linden UDP protoco
 The dissector parses the message_template.msg file and use that information to decode all the message fields from the Linden UDP protocol.
 
 == Installing ==
-* Requires wireshark with Lua 5.1.x support.  [http://wiki.wireshark.org/Lua See this page for getting wireshark to support lua]
+* Requires wireshark with Lua 5.2.x support. Tested on Wireshark 2.2.7
 
 === on Linux ===
-* Copy all four source files into ~/.wireshark
-* edit ''/etc/wireshark/init.lua'' (or equivalent on your system) and change ''disable_lua'' to ''false'' (default is true)
-* If you need to run wireshark as the root user or using sudo then you will need to edit the scripts into one file by replacing the dofile("script.lua") calls with the contents of file between the quotes.
+* Copy the lludp folder into ~/.wireshark/plugins
 * The other method is to add your user account to the correct group (on Gentoo it is group "wireshark") that will allow your non-root user to capture packets.
 
 === on Windows ===
-* Copy all four source files into your user profiles directory 
-
-'''Vista*'''
-
-    C:\Users\<username>\AppData\Roaming\Wireshark 
-
-'''XP/2000'''
-
-    C:\Documents and Settings\<username>\Application Data\Wireshark
-
-* Edit C:\Program Files\Wireshark\init.lua and change ''disable_lua'' to ''false''  (default is true)
-
-* *Note: I have only tested this on Windows XP
+* Copy the lludp folder into C:\Users\<username>\AppData\Roaming\Wireshark\plugins
 
 == LLUDP preferences ==
 There are three preferences that can be changed from wiresharks "Preferences" dialog:
-* Message template file: Full path to the message_template.msg file used to decode message name & details from the packets.  On windows XP/Vista use double backslash '\\' instead of single blackslash '\' to separate directories (Example "C:\\Program Files\\SecondLife\\app_settings\\message_template.msg").
+* Message template file: Full path to the message_template.msg file used to decode message name & details from the packets.  On windows XP/Vista use double backslash '\\' instead of single blackslash '\' to separate directories (Example "C:\\Program Files (x86)\\SecondLifeViewer\\app_settings\\message_template.msg"). A copy of this file is included in the disector; change this preference if you need to use another
 * UDP port range start: First UDP port to mark as LLUDP packets. (default 13000)
 * UDP port range end: Last UDP port to mark as LLUDP packets. (default 13050)
 
 If your OpenSim regions are using ports 9000-9050 range then change the UDP port range.
 
 == Description of source files ==
-* "init.lua" -- simple script that loads the "lludp.lua" script.
-* "lludp.lua" -- contains the code that decodes each packet header and decompresses zero-encoded packets.  This file uses wireshark only functions for accessing packet bytes and building a tree of information from each packet.
-* "llmessage.lua" -- contains the message_template.msg file parser the decodes the tokens from the lexer into an tree of tables containing all details about each message/block/variable from the template file.  This file only has pure lua code.
+* "init.lua" -- Sets up http decoders on extra port ranges
+* "dissector.lua" -- contains the code that decodes each packet header and decompresses zero-encoded packets.  This file uses wireshark only functions for accessing packet bytes and building a tree of information from each packet.
+* "message_template.lua" -- contains the message_template.msg file parser the decodes the tokens from the lexer into an tree of tables containing all details about each message/block/variable from the template file.  This file only has pure lua code.
 * "lexer.lua" -- contains the template file lexer.  This lexer knows how to tokenize the template file into the follow tokens: IDENTIFIER, NUMBER, COMMENT, EOL.  The stream of tokens produced by this lexer is parsed by the "llmessage.lua" file.  This file only has pure lua code.
 
 == License ==
