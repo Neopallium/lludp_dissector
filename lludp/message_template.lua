@@ -435,7 +435,7 @@ eof = function(state)
 end,
 }
 
-module('lludp.message_template')
+-- Public API --
 
 function parse(file, quiet)
 	-- create lexer
@@ -461,3 +461,4 @@ function parse(file, quiet)
 	return ret
 end
 
+return {parse = parse}

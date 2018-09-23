@@ -299,6 +299,31 @@ local function register_udp_port_range(start_port, end_port)
   end
 end
 
+
+local PATH_SEPARATOR = package.config:sub(1,1)
+local function path(...)
+	return table.concat(table.pack(...), PATH_SEPARATOR)
+end
+
+local function file_exists(name)
+	local f=io.open(name,"r")
+	if f~=nil then io.close(f) return true else return false end
+end
+
+local template_search_paths = {
+	'',
+	path(Dir.global_plugins_path(), 'lludp', ''),
+	path(Dir.personal_plugins_path(), 'lludp', ''),
+}
+
+local function template_file_path(file)
+	for k, base_path in pairs(template_search_paths) do
+		path = base_path .. file
+		if file_exists(path) then return path end
+	end
+	return nil
+end
+
 -- handle preferences changes.
 function lludp_proto.init(arg1, arg2)
 	local old_start, old_end
@@ -311,7 +336,7 @@ function lludp_proto.init(arg1, arg2)
 				-- load & parse message_template.msg file.
 				local file = new_v
 				if file and file:len() > 0 then
-					local new_details = template.parse(file)
+					local new_details = template.parse(template_file_path(file))
 					if new_details then
 						message_details = new_details
 					end
@@ -660,5 +685,4 @@ end
 register_udp_port_range(9000,9003)
 -- reg. ports 12000-12050
 register_udp_port_range(12030,12040)
---register_udp_port_range(13000,13050)
-
+-- register_udp_port_range(13000,13050)
