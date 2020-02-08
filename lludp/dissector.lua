@@ -633,7 +633,7 @@ function lludp_proto.dissector(buffer,pinfo,tree)
 	if msg_name == nil then
 		msg_name = format("0x%08x", msg_id)
 	else
-		lludp_tree:add(fds.msg_name, rang, msg_name)
+		lludp_tree:add(fds.msg_name, msg_name)
 	end
 	-- Message body.
 	rang = msg_buffer(offset, msg_len)
