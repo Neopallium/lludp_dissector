@@ -282,10 +282,10 @@ local function unregister_udp_port_range(start_port, end_port)
 	if not start_port or start_port <= 0 or not end_port or end_port <= 0 then
 		return
 	end
-  local udp_port_table = DissectorTable.get("udp.port")
-  for port = start_port,end_port do
-    udp_port_table:remove(port,lludp_proto)
-  end
+	local udp_port_table = DissectorTable.get("udp.port")
+	for port = start_port,end_port do
+		udp_port_table:remove(port,lludp_proto)
+	end
 end
 
 -- register lludp to handle udp port range
@@ -293,10 +293,10 @@ local function register_udp_port_range(start_port, end_port)
 	if not start_port or start_port <= 0 or not end_port or end_port <= 0 then
 		return
 	end
-  local udp_port_table = DissectorTable.get("udp.port")
-  for port = start_port,end_port do
-    udp_port_table:add(port,lludp_proto)
-  end
+	local udp_port_table = DissectorTable.get("udp.port")
+	for port = start_port,end_port do
+		udp_port_table:add(port,lludp_proto)
+	end
 end
 
 -- handle preferences changes.
@@ -393,12 +393,11 @@ local function zero_decode(zero_buf)
 	local out_buf = ByteArray.new()
 	local zero_off = 0
 	local zero_len = zero_buf:len()
-	local out_size = 0
+	local out_size = zero_len
 	local out_off = 0
 	local b
 	-- pre-allocate
-	grow_buff(out_buf, zero_len)
-	out_size = zero_len
+	grow_buff(out_buf, out_size)
 	-- zero expand
 	repeat
 		b = zero_buf:get_index(zero_off)
@@ -463,7 +462,7 @@ local function get_msg_name(msg_id)
 	end
 	return msg.name
 end
- 
+
 -- calculate length a block.
 local function get_block_length(msg_buffer, start_offset, block)
 	-- check if bock is fixed length.
@@ -474,7 +473,7 @@ local function get_block_length(msg_buffer, start_offset, block)
 	local offset = start_offset
 	local rang
 	for _,var in ipairs(block) do
-		local len = 0
+		local len
 		if var.has_count then
 			-- variable with length bytes.
 			len = var.count_length
@@ -498,7 +497,7 @@ local function build_block_tree(msg_buffer, block_tree, start_offset, block)
 	local rang
 	-- parse block's variables
 	for _,var in ipairs(block) do
-		local len = 0
+		local len
 		if var.has_count then
 			-- variable with length bytes.
 			len = var.count_length
@@ -521,7 +520,7 @@ end
 
 -- buid message tree
 local function build_msg_tree(msg_buffer, msg_tree, msg_id)
-	local offset = 0
+	local offset
 	local rang
 	-- check that we have message details
 	if message_details == nil then
@@ -539,7 +538,7 @@ local function build_msg_tree(msg_buffer, msg_tree, msg_id)
 	end
 	-- skip message id bytes.
 	offset = msg.id_length
-  -- set message name.
+	-- set message name.
 	msg_tree:set_text(msg.name .. ":")
 	-- proccess message blocks
 	for _,block in ipairs(msg) do
@@ -548,7 +547,7 @@ local function build_msg_tree(msg_buffer, msg_tree, msg_id)
 			-- parse count byte.
 			rang = msg_buffer(offset,1)
 			count = rang:uint()
-  		msg_tree:add(fds.block_count,rang)
+			msg_tree:add(fds.block_count,rang)
 			offset = offset + 1
 		end
 		-- print("block name: ", block.name, count)
@@ -556,7 +555,7 @@ local function build_msg_tree(msg_buffer, msg_tree, msg_id)
 			local block_len = get_block_length(msg_buffer, offset, block)
 			-- parse block
 			rang = msg_buffer(offset, block_len)
-  		local block_tree = msg_tree:add(fds.block,rang)
+			local block_tree = msg_tree:add(fds.block,rang)
 			if count > 1 then
 				block_tree:set_text(format("%s: %d of %d",block.name,n,count))
 			else
@@ -573,29 +572,29 @@ end
 -- packet dissector
 function lludp_proto.dissector(buffer,pinfo,tree)
 	local rang,offset
-  pinfo.cols.protocol = "LLUDP"
-  local lludp_tree = tree:add(lludp_proto,buffer(),"Linden UDP Protocol")
+	pinfo.cols.protocol = "LLUDP"
+	local lludp_tree = tree:add(lludp_proto,buffer(),"Linden UDP Protocol")
 	-- Flags byte.
 	offset = 0
 	rang = buffer(offset,1)
 	local flags = rang:uint()
 	local flags_bits, flags_list = parse_flags(flags)
-  local flags_tree = lludp_tree:add(fds.flags, rang)
+	local flags_tree = lludp_tree:add(fds.flags, rang)
 	flags_tree:set_text("Flags: " .. format('0x%02X (%s)', flags, flags_list))
-  flags_tree:add(fds.flags_zero, rang)
-  flags_tree:add(fds.flags_reliable, rang)
-  flags_tree:add(fds.flags_resent, rang)
-  flags_tree:add(fds.flags_ack, rang)
+	flags_tree:add(fds.flags_zero, rang)
+	flags_tree:add(fds.flags_reliable, rang)
+	flags_tree:add(fds.flags_resent, rang)
+	flags_tree:add(fds.flags_ack, rang)
 	offset = offset + 1
 	-- Sequence number 4 bytes.
 	rang = buffer(offset,4)
 	local sequence = rang:uint()
-  lludp_tree:add(fds.sequence, rang)
+	lludp_tree:add(fds.sequence, rang)
 	offset = offset + 4
 	-- Extra header length.
 	rang = buffer(offset,1)
 	local extra_length = rang:uint()
-  lludp_tree:add(fds.extra_len,rang)
+	lludp_tree:add(fds.extra_len,rang)
 	offset = offset + 1
 	-- Extra header data.
 	if extra_length > 0 then
@@ -645,15 +644,15 @@ function lludp_proto.dissector(buffer,pinfo,tree)
 		local acks_off = buffer:len()
 		rang = buffer(acks_off - 1, 1)
 		acks_off = acks_off - acks_bytes
-  	local acks_tree = lludp_tree:add(fds.acks_count, rang)
+		local acks_tree = lludp_tree:add(fds.acks_count, rang)
 		for i = 1,acks_count do
 			rang = buffer(acks_off,4)
-  		acks_tree:add(fds.acks, rang)
+			acks_tree:add(fds.acks, rang)
 			acks_off = acks_off + 4
 		end
 	end
 	-- Info column
-  pinfo.cols.info = format('[%s] Seq=%u Type=%s Len=%u',flags_list,sequence,msg_name,msg_len+6)
+	pinfo.cols.info = format('[%s] Seq=%u Type=%s Len=%u',flags_list,sequence,msg_name,msg_len+6)
 end
 
 -- register lludp to handle udp ports 9000-9003
