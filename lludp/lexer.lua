@@ -41,7 +41,7 @@ local function default_parse_tokens(line)
 
 	-- split line into tokens using white-space as token delimitator
 	for tok in line:gmatch("%s?([^%s]+)") do
-		local tok_type = Token.NONE
+		local tok_type
 		-- check for number
 		if tonumber(tok) ~= nil then
 			tok_type = Token.NUMBER
@@ -63,13 +63,7 @@ local function default_parse_tokens(line)
 	return tokens
 end
 
-module(...)
-
--- export Token & TokenNames tables
-_M.Token = Token
-_M.TokenNames = TokenNames
-
-function new(file, parse_tokens)
+local function new(file, parse_tokens)
 	-- use the default line tokenizer if one is not provided
 	parse_tokens = parse_tokens or default_parse_tokens
 	-- next/current line code
@@ -113,7 +107,7 @@ function new(file, parse_tokens)
 	return lexer
 end
 
-function dump(file)
+local function dump(file)
 	local lexer = new(file)
 	local num = -1
 	while true do
@@ -131,3 +125,11 @@ function dump(file)
 	io_write("\n")
 end
 
+return {
+	-- export Token & TokenNames tables
+	Token = Token,
+	TokenNames = TokenNames,
+
+	new = new,
+	dump = dump,
+}

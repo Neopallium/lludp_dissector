@@ -15,7 +15,7 @@ local lex
 local cur_token = nil
 local cur_token_str = nil
 
-local function get_token(skip_tokens)
+local function get_token()
 	local token = lex.get_token()
 	if token ~= nil then
 		cur_token = token[1]
@@ -146,7 +146,7 @@ end,
 	end
 	return nil
 end,
-["{"]		= function(state)
+["{"]		= function()
 	error("sub block not allowed in variable block")
 end,
 ["}"]		= function(state)
@@ -289,7 +289,7 @@ init = function()
 		required = 5,
 	}
 end,
-[Token.COMMENT] = function(state)
+[Token.COMMENT] = function()
 	return nil
 end,
 [Token.IDENTIFIER] 	= function(state)
@@ -427,7 +427,7 @@ end,
 	state.msgs[message.id] = message
 	state.msgs_file_order[#state.msgs_file_order + 1] = message
 end,
-["}"]		= function(state)
+["}"]		= function()
 	error(format("unhandled '%s' token",cur_token_str))
 end,
 eof = function(state)
@@ -435,11 +435,10 @@ eof = function(state)
 end,
 }
 
-module('lludp.message_template')
-
-function parse(file, quiet)
+local function parse(file, quiet)
 	-- create lexer
-	local status, ret = pcall(lexer.new,file)
+	local status, ret
+	status, ret = pcall(lexer.new,file)
 	if not status then
 		ret = format("LLUDP: Failed parse file into tokens: %s\n%s\n", file, ret)
 		error(ret, 0)
@@ -447,7 +446,7 @@ function parse(file, quiet)
 	end
 	lex = ret
 	-- parse template file
-	local status, ret = pcall(run_parser,template_parser)
+	status, ret = pcall(run_parser,template_parser)
 	if not status then
 		ret = format("LLUDP: Failed parsing on line %s:%d: '%s'\n%s\n",
 			file, lexer.get_line_number(), lexer.get_line(), ret)
@@ -461,3 +460,6 @@ function parse(file, quiet)
 	return ret
 end
 
+return {
+	parse = parse,
+}

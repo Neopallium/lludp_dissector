@@ -300,7 +300,7 @@ local function register_udp_port_range(start_port, end_port)
 end
 
 -- handle preferences changes.
-function lludp_proto.init(arg1, arg2)
+function lludp_proto.init()
 	local old_start, old_end
 	local new_start, new_end
 	-- check if preferences have changed.
@@ -341,8 +341,8 @@ end
 
 -- parse flag bits.
 local FLAG_ZER = 4
-local FLAG_REL = 3
-local FLAG_RES = 2
+--local FLAG_REL = 3
+--local FLAG_RES = 2
 local FLAG_ACK = 1
 local flag_names = {"ACK", "RES", "REL", "ZER"}
 local bits_lookup = {
@@ -622,7 +622,8 @@ function lludp_proto.dissector(buffer,pinfo,tree)
 		offset = 0
 	end
 	-- Message ID
-	local msg_id, msg_id_len = -1, 4
+	local msg_id
+	local msg_id_len = 4
 	if msg_id_len > msg_len then
 		msg_id_len = msg_len
 	end
@@ -645,7 +646,7 @@ function lludp_proto.dissector(buffer,pinfo,tree)
 		rang = buffer(acks_off - 1, 1)
 		acks_off = acks_off - acks_bytes
 		local acks_tree = lludp_tree:add(fds.acks_count, rang)
-		for i = 1,acks_count do
+		for _ = 1,acks_count do
 			rang = buffer(acks_off,4)
 			acks_tree:add(fds.acks, rang)
 			acks_off = acks_off + 4
@@ -656,7 +657,7 @@ function lludp_proto.dissector(buffer,pinfo,tree)
 end
 
 -- register lludp to handle udp ports 9000-9003
-register_udp_port_range(9000,9003)
+register_udp_port_range(9000,9100)
 -- reg. ports 12000-12050
 register_udp_port_range(12030,12040)
 --register_udp_port_range(13000,13050)
