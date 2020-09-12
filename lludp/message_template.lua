@@ -1,12 +1,14 @@
--- Copyright (c)2011, Robert G. Jakabosky <bobby@sharedrealm.com>. All rights reserved.
+-- Copyright (c) 2020, Robert G. Jakabosky <rjakabosky@sharedrealm.com>. All rights reserved.
 
 local lexer = require("lludp.lexer")
 local Token = lexer.Token
 local TokenNames = lexer.TokenNames
 
+local io_lines = io.lines
 local io_write = io.write
 local format = string.format
 local tinsert = table.insert
+local tremove = table.remove
 local pcall = pcall
 local error = error
 local tonumber = tonumber
@@ -309,7 +311,10 @@ end,
 		state.required = state.required - 1
 	elseif state.expect_field == "compression" then
 		state.compression = cur_token_str
+		state.expect_field = "udp"
 		state.required = state.required - 1
+	elseif state.expect_field == "udp" then
+		state.udp = cur_token_str
 	else
 		error(format("unhandled message identifier: %s\n",cur_token_str))
 	end
@@ -449,7 +454,7 @@ local function parse(file, quiet)
 	status, ret = pcall(run_parser,template_parser)
 	if not status then
 		ret = format("LLUDP: Failed parsing on line %s:%d: '%s'\n%s\n",
-			file, lexer.get_line_number(), lexer.get_line(), ret)
+			file, lex.get_line_number() or 0, lex.get_line() or 'nil', ret or 'nil')
 		error(ret, 0)
 		return nil
 	end
@@ -460,6 +465,71 @@ local function parse(file, quiet)
 	return ret
 end
 
+local function query(template, path)
+	-- split path into table of path parts.
+	if type(path) == 'string' then
+		local spath = path
+		local i=1
+		path = {}
+		for n in spath:gmatch('([^.]+).?') do
+			path[i] = n
+			i = i + 1
+		end
+	end
+	-- for each part in path search one level.
+	local group = template.msgs_file_order
+	local found = nil
+	for i=1,#path do
+		local name = path[i]
+		found = nil
+		for x=1,#group do
+			local elem = group[x]
+			if elem.name == name then
+				-- found element with matching name.
+				found = elem
+				break
+			end
+		end
+		-- if not found abort
+		if found == nil then return nil end
+		-- search for next part
+		group = found
+	end
+	return found
+end
+
+local function clean(template, unused_packets_file)
+	local unused = {}
+	if unused_packets_file then
+		for name in io_lines(unused_packets_file) do
+			unused[name] = true
+		end
+	end
+	-- string all comments & unused messages
+	template.comments = nil
+	local msg_list = template.msgs_file_order
+	local msg_by_id = template.msgs
+	for list_i=#msg_list,1,-1 do
+		local msg = msg_list[list_i]
+		if unused[msg.name] then
+			-- remove unused packet.
+			tremove(msg_list, list_i)
+			msg_by_id[msg.id] = nil
+		else
+			msg.comments = nil
+			for i=1, #msg do
+				local block = msg[i]
+				block.comments = nil
+				for x=1, #block do
+					block[x].eol_comment = nil
+				end
+			end
+		end
+	end
+end
+
 return {
 	parse = parse,
+	query = query,
+	clean = clean,
 }

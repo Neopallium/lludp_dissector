@@ -1,13 +1,13 @@
--- Copyright (c)2011, Robert G. Jakabosky <bobby@sharedrealm.com>. All rights reserved.
+-- Copyright (c) 2020, Robert G. Jakabosky <rjakabosky@sharedrealm.com>. All rights reserved.
 
 local template = require("lludp.message_template")
 
 -- cache globals to local for speed.
 local format=string.format
+local concat=table.concat
 local tostring=tostring
 local tonumber=tonumber
 local sqrt=math.sqrt
-local ipairs=ipairs
 local pairs=pairs
 
 -- wireshark API globals
@@ -66,6 +66,19 @@ udp_port_end = -1,
 -- current list of parsed messages.
 local message_details = nil
 
+-- list of parsed acks (this is for the PacketAck message)
+local acks = {}
+local function push_ack(ack)
+	acks[#acks + 1] = ack
+end
+local function dump_acks()
+	local d = concat(acks, ',')
+	for i=1,#acks do
+		acks[i] = nil
+	end
+	return d
+end
+
 -- setup protocol fields.
 lludp_proto.fields = {}
 local fds = lludp_proto.fields
@@ -77,6 +90,7 @@ fds.flags_ack = ProtoField.new("Ack", "lludp.flags.ack", ftypes.UINT8, nil, base
 fds.sequence = ProtoField.new("Sequence", "lludp.sequence", ftypes.UINT32, nil, base.DEC)
 fds.extra_len = ProtoField.new("Extra length", "lludp.extra_len", ftypes.UINT8, nil, base.DEC)
 fds.extra_bytes = ProtoField.new("Extra header", "lludp.extra_bytes", ftypes.BYTES, nil, base.NONE)
+fds.zero_saved = ProtoField.new("Zero encoding bytes saved", "lludp.zero_saved", ftypes.INT32, nil, base.DEC)
 fds.msg_id = ProtoField.new("Message ID", "lludp.msg.id", ftypes.UINT32, nil, base.HEX)
 fds.msg_name = ProtoField.new("Message name", "lludp.msg.name", ftypes.STRINGZ, nil)
 fds.msg = ProtoField.new("Message body", "lludp.msg", ftypes.BYTES, nil, base.NONE)
@@ -105,6 +119,18 @@ fds.var_lluuid = ProtoField.new("LLUUID", "lludp.var.lluuid", ftypes.BYTES, nil,
 fds.var_bool = ProtoField.new("BOOL", "lludp.var.bool", ftypes.UINT8, nil, base.DEC)
 fds.var_ipaddr = ProtoField.new("IPADDR", "lludp.var.ipaddr", ftypes.IPv4, nil, base.NONE)
 fds.var_ipport = ProtoField.new("IPPORT", "lludp.var.ipport", ftypes.UINT16, nil, base.DEC)
+
+-- cache list of Data variables.
+local Var_is_data = setmetatable({},{__index = function(tab, name)
+	local is_data = false
+	-- try to guess if this field is text.
+	if name:find("Data") then
+		-- this is a data find.
+		is_data = true
+	end
+	rawset(tab, name, is_data)
+end})
+
 -- variable type handlers.
 local variable_handlers = {
 Fixed = function(block_tree, buffer, offset, len, var)
@@ -117,12 +143,7 @@ Fixed = function(block_tree, buffer, offset, len, var)
 	end
 end,
 Variable = function(block_tree, buffer, offset, len, var)
-	local is_data = false
-	-- try to guess if this field is text.
-	if var.name:find("Data") then
-		-- this is a data find.
-		is_data = true
-	end
+	local is_data = Var_is_data[var.name]
 	local str_rang = buffer(offset + var.count_length, len - var.count_length)
 	local bytes = str_rang:bytes()
 	if not is_data and is_string(bytes) then
@@ -153,6 +174,15 @@ U32 = function(block_tree, buffer, offset, len, var)
 	local rang = buffer(offset, len)
 	local ti = block_tree:add_le(fds.var_u32, rang)
 	ti:set_text(format("%s: %d", var.name, rang:le_uint()))
+end,
+ACK_U32 = function(block_tree, buffer, offset, len, var)
+	local rang = buffer(offset, len)
+	local ti = block_tree:add_le(fds.acks, rang)
+	local ack = rang:le_uint()
+	if var.name ~= "OldestUnacked" then
+		push_ack(ack)
+	end
+	ti:set_text(format("%s: %d", var.name, ack))
 end,
 U64 = function(block_tree, buffer, offset, len, var)
 	local rang = buffer(offset, len)
@@ -313,6 +343,16 @@ function lludp_proto.init()
 				if file and file:len() > 0 then
 					local new_details = template.parse(file)
 					if new_details then
+						template.clean(new_details)
+						-- mark the ID field in PacketAck as an ACK for searching.
+						local ack_field = template.query(new_details, "PacketAck.Packets.ID")
+						if ack_field then
+							ack_field.type = "ACK_U32"
+						end
+						ack_field = template.query(new_details, "StartPingCheck.PingID.OldestUnacked")
+						if ack_field then
+							ack_field.type = "ACK_U32"
+						end
 						message_details = new_details
 					end
 				end
@@ -340,42 +380,69 @@ function lludp_proto.init()
 end
 
 -- parse flag bits.
-local FLAG_ZER = 4
---local FLAG_REL = 3
---local FLAG_RES = 2
-local FLAG_ACK = 1
+local BITS = {
+	ZER = 0x80,
+	REL = 0x40,
+	RES = 0x20,
+	ACK = 0x10,
+}
 local flag_names = {"ACK", "RES", "REL", "ZER"}
 local bits_lookup = {
 	{},
-	{1},
-	{2},
-	{2,1},
-	{3},
-	{3,1},
-	{3,2},
-	{3,2,1},
-	{4},
-	{4,1},
-	{4,2},
-	{4,2,1},
-	{4,3},
-	{4,3,1},
-	{4,3,2},
-	{4,3,2,1},
+	{ACK = true},
+	{RES = true},
+	{RES = true,ACK = true},
+	{REL = true},
+	{REL = true,ACK = true},
+	{REL = true,RES = true},
+	{REL = true,RES = true,ACK = true},
+	{ZER = true},
+	{ZER = true,ACK = true},
+	{ZER = true,RES = true},
+	{ZER = true,RES = true,ACK = true},
+	{ZER = true,REL = true},
+	{ZER = true,REL = true,ACK = true},
+	{ZER = true,REL = true,RES = true},
+	{ZER = true,REL = true,RES = true,ACK = true},
 }
 local function parse_flags(flags)
 	flags = (flags / 16) + 1
-	local bit_list = bits_lookup[flags]
-	local bits = {}
-	local names = ""
-	for _, bit in ipairs(bit_list) do
-		bits[bit] = true
-		if names:len() > 0 then
-			names = names .. ", "
+	return bits_lookup[flags] or bits_lookup[1]
+end
+
+-- make bits object
+local function make_bits(bits)
+	local meta = {
+		__index = bits,
+		__tostring = function()
+			return bits.flags
+		end,
+	}
+	-- combind bits into string description.
+	local flags = nil
+	for i=1,#flag_names do
+		local name = flag_names[i]
+		if bits[name] then
+			if flags then
+				flags = flags .. ',' .. name
+			else
+				flags = name
+			end
 		end
-		names = names .. flag_names[bit]
 	end
-	return bits, names
+	-- combind bits into one byte value.
+	local byte = 0x00
+	for k,_ in pairs(bits) do
+		local bit = assert(BITS[k], "Invalid bit name.")
+		byte = byte + bit
+	end
+	bits.flags = flags
+	bits.byte = byte
+	return setmetatable({}, meta)
+end
+-- make bits objects in bis_lookup
+for i=1,#bits_lookup do
+	bits_lookup[i] = make_bits(bits_lookup[i])
 end
 
 local function grow_buff(buff, size)
@@ -448,19 +515,15 @@ local function parse_msg_id(buff)
 	return msg_id, msg_id_len
 end
 
--- get message name.
-local function get_msg_name(msg_id)
+-- get message details
+local function get_msg_details(msg_id)
 	-- check that we have message details
-	if message_details == nil then
-		return format("0x%08x", msg_id)
+	if message_details then
+		-- find message name from id.
+		return message_details.msgs[msg_id]
 	end
-	-- find message name from id.
-	local msg = message_details.msgs[msg_id]
 	-- Invalid message id
-	if msg == nil then
-		return format("0x%08x", msg_id)
-	end
-	return msg.name
+	return nil
 end
 
 -- calculate length a block.
@@ -472,19 +535,17 @@ local function get_block_length(msg_buffer, start_offset, block)
 	-- parse block's variables to calculate total block length.
 	local offset = start_offset
 	local rang
-	for _,var in ipairs(block) do
+	for i=1,#block do
+		local var = block[i]
 		local len
 		if var.has_count then
 			-- variable with length bytes.
 			len = var.count_length
-			--print(var.name, offset, ", len:", len)
 			rang = msg_buffer(offset, len)
 			len = len + rang:le_uint()
-			--print(var.name, var.count_length, ", total:", len)
 		else
 			-- fixed length variable
 			len = var.length
-			--print(var.name, ", total:", len)
 		end
 		offset = offset + len
 	end
@@ -496,7 +557,8 @@ local function build_block_tree(msg_buffer, block_tree, start_offset, block)
 	local offset = start_offset
 	local rang
 	-- parse block's variables
-	for _,var in ipairs(block) do
+	for i=1,#block do
+		local var = block[i]
 		local len
 		if var.has_count then
 			-- variable with length bytes.
@@ -519,29 +581,28 @@ local function build_block_tree(msg_buffer, block_tree, start_offset, block)
 end
 
 -- buid message tree
-local function build_msg_tree(msg_buffer, msg_tree, msg_id)
+local function build_msg_tree(details, msg_buffer, msg_tree, msg_id)
 	local offset
 	local rang
 	-- check that we have message details
-	if message_details == nil then
+	if details == nil then
+		-- Invalid message id
+		if message_details then
+			local txt = format("Invalid message id: 0x%08x", msg_id)
+			msg_tree:add_expert_info(PI_MALFORMED, PI_ERROR, txt)
+			msg_tree:set_text(txt)
+			return nil
+		end
 		msg_tree:set_text(format("Message Id: 0x%08x", msg_id))
 		return nil
 	end
-	-- find message name from id.
-	local msg = message_details.msgs[msg_id]
-	-- Invalid message id
-	if msg == nil then
-		msg = format("Invalid message id: 0x%08x", msg_id)
-		msg_tree:add_expert_info(PI_MALFORMED, PI_ERROR, msg)
-		msg_tree:set_text(msg)
-		return nil
-	end
 	-- skip message id bytes.
-	offset = msg.id_length
+	offset = details.id_length
 	-- set message name.
-	msg_tree:set_text(msg.name .. ":")
+	msg_tree:set_text(details.name .. ":")
 	-- proccess message blocks
-	for _,block in ipairs(msg) do
+	for i=1,#details do
+		local block = details[i]
 		local count = block.count
 		if count == nil then
 			-- parse count byte.
@@ -550,7 +611,6 @@ local function build_msg_tree(msg_buffer, msg_tree, msg_id)
 			msg_tree:add(fds.block_count,rang)
 			offset = offset + 1
 		end
-		-- print("block name: ", block.name, count)
 		for n=1,count do
 			local block_len = get_block_length(msg_buffer, offset, block)
 			-- parse block
@@ -566,19 +626,22 @@ local function build_msg_tree(msg_buffer, msg_tree, msg_id)
 			offset = offset + block_len
 		end
 	end
-	return msg.name
+	return details.name
 end
 
 -- packet dissector
 function lludp_proto.dissector(buffer,pinfo,tree)
 	local rang,offset
+	local msg_info = pinfo.private
 	pinfo.cols.protocol = "LLUDP"
 	local lludp_tree = tree:add(lludp_proto,buffer(),"Linden UDP Protocol")
 	-- Flags byte.
 	offset = 0
 	rang = buffer(offset,1)
 	local flags = rang:uint()
-	local flags_bits, flags_list = parse_flags(flags)
+	local flags_bits = parse_flags(flags)
+	msg_info.flags = tostring(flags_bits)
+	local flags_list = flags_bits.flags or ''
 	local flags_tree = lludp_tree:add(fds.flags, rang)
 	flags_tree:set_text("Flags: " .. format('0x%02X (%s)', flags, flags_list))
 	flags_tree:add(fds.flags_zero, rang)
@@ -589,7 +652,10 @@ function lludp_proto.dissector(buffer,pinfo,tree)
 	-- Sequence number 4 bytes.
 	rang = buffer(offset,4)
 	local sequence = rang:uint()
+	msg_info.sequence = sequence
 	lludp_tree:add(fds.sequence, rang)
+	local seq_ack = lludp_tree:add(fds.acks, rang)
+	seq_ack:set_hidden()
 	offset = offset + 4
 	-- Extra header length.
 	rang = buffer(offset,1)
@@ -605,7 +671,7 @@ function lludp_proto.dissector(buffer,pinfo,tree)
 	-- Appended Acks. count
 	local acks_bytes = 0
 	local acks_count = 0
-	if flags_bits[FLAG_ACK] then
+	if flags_bits.ACK then
 		rang = buffer(buffer:len() - 1, 1)
 		acks_count = rang:uint()
 		acks_bytes = (acks_count * 4) + 1
@@ -613,14 +679,20 @@ function lludp_proto.dissector(buffer,pinfo,tree)
 	-- Zero Decode
 	local msg_len = (buffer:len() - acks_bytes) - offset
 	local msg_buffer
-	if flags_bits[FLAG_ZER] then
-		msg_buffer=zero_decode(buffer(offset,msg_len):bytes())
+	if flags_bits.ZER then
+		local zero_len = msg_len
+		msg_buffer=zero_decode(buffer(offset,zero_len):bytes())
 		msg_len = msg_buffer:len()
+		local zero_saved = (msg_len - zero_len)
+		msg_info.zero_saved = zero_saved
+		local saved = lludp_tree:add(fds.zero_saved, buffer(offset,0), zero_saved)
+		saved:set_generated()
 		offset = 0
 	else
 		msg_buffer = buffer(offset, msg_len):tvb()
 		offset = 0
 	end
+	msg_info.msg_len = msg_len
 	-- Message ID
 	local msg_id
 	local msg_id_len = 4
@@ -630,27 +702,34 @@ function lludp_proto.dissector(buffer,pinfo,tree)
 	msg_id, msg_id_len = parse_msg_id(msg_buffer(offset, msg_id_len):bytes())
 	rang = msg_buffer(offset, msg_id_len)
 	lludp_tree:add(fds.msg_id, rang)
-	local msg_name = get_msg_name(msg_id)
-	if msg_name == nil then
+	local msg_details = get_msg_details(msg_id)
+	local msg_name
+	if msg_details == nil then
 		msg_name = format("0x%08x", msg_id)
 	else
+		msg_name = msg_details.name
 		lludp_tree:add(fds.msg_name, msg_name)
 	end
+	msg_info.name = msg_name
 	-- Message body.
 	rang = msg_buffer(offset, msg_len)
 	local msg_tree = lludp_tree:add(fds.msg, rang)
-	build_msg_tree(msg_buffer, msg_tree, msg_id)
+	build_msg_tree(msg_details, msg_buffer, msg_tree, msg_id)
 	-- Appended Acks. list.
-	if flags_bits[FLAG_ACK] then
+	if flags_bits.ACK then
 		local acks_off = buffer:len()
 		rang = buffer(acks_off - 1, 1)
 		acks_off = acks_off - acks_bytes
 		local acks_tree = lludp_tree:add(fds.acks_count, rang)
 		for _ = 1,acks_count do
 			rang = buffer(acks_off,4)
+			push_ack(rang:uint())
 			acks_tree:add(fds.acks, rang)
 			acks_off = acks_off + 4
 		end
+	end
+	if #acks > 0 then
+		msg_info.acks = dump_acks()
 	end
 	-- Info column
 	pinfo.cols.info = format('[%s] Seq=%u Type=%s Len=%u',flags_list,sequence,msg_name,msg_len+6)
@@ -662,3 +741,5 @@ register_udp_port_range(9000,9100)
 register_udp_port_range(12030,12040)
 --register_udp_port_range(13000,13050)
 
+-- register all lludp taps.
+require"lludp.stats_tap"

@@ -10,4 +10,5 @@ end
 
 -- Load lludp protocol dissector.
 require("lludp.dissector")
+require("lludp.stats_tap")
 

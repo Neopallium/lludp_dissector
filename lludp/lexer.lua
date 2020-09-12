@@ -1,4 +1,4 @@
--- Copyright (c) 2010, Robert G. Jakabosky <bobby@sharedrealm.com> All rights reserved.
+-- Copyright (c) 2020, Robert G. Jakabosky <rjakabosky@sharedrealm.com> All rights reserved.
 
 local io_lines = io.lines
 local io_write = io.write
